@@ -1,0 +1,375 @@
+import React, { useState, useEffect } from "react";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+  ImageBackground,
+} from "react-native";
+import { Picker } from "@react-native-picker/picker";
+import { collection, query, where, getDocs } from "firebase/firestore";
+import Icon from "react-native-vector-icons/Ionicons";
+import { db } from "../config/firebase";
+
+const referenceRanges = {
+  IgA: {
+    "0-1": [0, 11],
+    "1-4": [6, 50],
+    "5-10": [20, 230],
+    "10+": [50, 312],
+  },
+  IgM: {
+    "0-1": [5, 30],
+    "1-4": [15, 70],
+    "5-10": [25, 120],
+    "10+": [36, 352],
+  },
+  IgG: {
+    "0-1": [200, 750],
+    "1-4": [280, 950],
+    "5-10": [380, 1250],
+    "10+": [450, 1650],
+  },
+};
+
+const UserScreen = ({ route, navigation }) => {
+  const { patientData } = route.params;
+  const [tests, setTests] = useState([]);
+  const [filteredTests, setFilteredTests] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedTest, setSelectedTest] = useState("");
+  const [availableDates, setAvailableDates] = useState([]);
+  const [availableTests, setAvailableTests] = useState([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const [userBirthDate, setUserBirthDate] = useState(null);
+
+  // Yaş hesaplama fonksiyonu
+  const calculateAge = (birthDate, testDate) => {
+    const birth = new Date(birthDate);
+    const test = new Date(testDate);
+    if (isNaN(birth.getTime()) || isNaN(test.getTime())) return "Geçersiz Tarih";
+
+    let age = test.getFullYear() - birth.getFullYear();
+    const monthDiff = test.getMonth() - birth.getMonth();
+    const dayDiff = test.getDate() - birth.getDate();
+
+    if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+      age--;
+    }
+    return age;
+  };
+
+  // Test sonucunu sınıflandırma fonksiyonu
+  const classifyResult = (testName, value, birthDate) => {
+    const age = calculateAge(birthDate, new Date());
+    const ageGroup =
+      age <= 1 ? "0-1" : age <= 4 ? "1-4" : age <= 10 ? "5-10" : "10+";
+    const referenceRange = referenceRanges[testName]?.[ageGroup];
+
+    if (!referenceRange) return "Referans aralığı bulunamadı";
+
+    if (value < referenceRange[0]) return "Düşük";
+    if (value > referenceRange[1]) return "Yüksek";
+    return "Normal";
+  };
+
+  // Kullanıcının doğum tarihini almak için fetch fonksiyonu
+  const fetchUserData = async () => {
+    try {
+      const usersRef = collection(db, "users");
+      const q = query(
+        usersRef,
+        where("fullName", "==", patientData.patientName) // Kullanıcının ismiyle eşleşen kaydı alıyoruz
+      );
+      const querySnapshot = await getDocs(q);
+
+      if (!querySnapshot.empty) {
+        const userDoc = querySnapshot.docs[0].data();
+        setUserBirthDate(userDoc.birthDate); // Doğum tarihini state'e kaydediyoruz
+      } else {
+        setError("Kullanıcı bilgisi bulunamadı.");
+      }
+    } catch (err) {
+      console.error("Kullanıcı verilerini çekerken hata: ", err);
+      setError("Bir hata oluştu. Lütfen tekrar deneyin.");
+    }
+  };
+
+  // Test verilerini almak için fetch fonksiyonu
+  const fetchTests = async () => {
+    if (!patientData?.patientName) {
+      setError("Hasta bilgileri eksik. Lütfen geri dönün.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const patientsRef = collection(db, "patients");
+      const q = query(
+        patientsRef,
+        where("patientName", "==", patientData.patientName)
+      );
+      const querySnapshot = await getDocs(q);
+
+      if (!querySnapshot.empty) {
+        const patientDoc = querySnapshot.docs[0].data();
+        const allTests = patientDoc.tests || [];
+        setTests(allTests);
+
+        const dates = [...new Set(allTests.map((test) => test.date))];
+        const testTypes = [...new Set(allTests.map((test) => test.testName))];
+        setAvailableDates(dates);
+        setAvailableTests(testTypes);
+        setFilteredTests(allTests);
+        setShowFilters(true);
+      } else {
+        setError("Tahlil bilgisi bulunamadı.");
+      }
+    } catch (err) {
+      console.error("Tahlilleri çekerken hata: ", err);
+      setError("Bir hata oluştu. Lütfen tekrar deneyin.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Testleri filtreleme fonksiyonu
+  const filterTests = () => {
+    const filtered = tests.filter((test) => {
+      return (
+        (selectedDate === "" || test.date === selectedDate) &&
+        (selectedTest === "" || test.testName === selectedTest)
+      );
+    });
+    setFilteredTests(filtered);
+  };
+
+  // useEffect ile kullanıcı verisini yükleme
+  useEffect(() => {
+    fetchUserData(); // Kullanıcı verilerini bir kez yükleyelim
+  }, []);
+
+  return (
+    <ImageBackground style={styles.background}>
+      <View style={styles.container}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Icon name="arrow-back" size={20} color="#fff" />
+        </TouchableOpacity>
+
+        <Text style={styles.header}>Hoş Geldiniz</Text>
+        <Text style={styles.header2}>
+          {patientData?.fullName
+            ? `${patientData.fullName}, tahlil sonuçlarınızı görüntülemek için tıklayın!`
+            : "TAHLİL SONUÇLARINIZI GÖRÜNTÜLEMEK İÇİN TIKLAYIN"}
+        </Text>
+
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity
+            style={styles.stylishButton}
+            onPress={fetchTests}
+            disabled={loading}
+          >
+            <Text style={styles.buttonText}>
+              {loading ? "Yükleniyor..." : "Tahlillerimi Görüntüle"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {loading && <ActivityIndicator size="large" color="#000080" />}
+        {error && !loading && <Text style={styles.errorText}>{error}</Text>}
+
+        {!loading && !error && showFilters && (
+          <View>
+            <View style={styles.filterContainer}>
+              <View style={styles.filterItem}>
+                <Text style={styles.label}>Tarih Seçin:</Text>
+                <Picker
+                  selectedValue={selectedDate}
+                  onValueChange={(value) => {
+                    setSelectedDate(value);
+                    filterTests();
+                  }}
+                  style={styles.picker}
+                >
+                  <Picker.Item label="Tüm Tarihler" value="" />
+                  {availableDates.map((date, index) => (
+                    <Picker.Item key={index} label={date} value={date} />
+                  ))}
+                </Picker>
+              </View>
+
+              <View style={styles.filterItem}>
+                <Text style={styles.label}>Test Türü Seçin:</Text>
+                <Picker
+                  selectedValue={selectedTest}
+                  onValueChange={(value) => {
+                    setSelectedTest(value);
+                    filterTests();
+                  }}
+                  style={styles.picker}
+                >
+                  <Picker.Item label="Tüm Test Türleri" value="" />
+                  {availableTests.map((test, index) => (
+                    <Picker.Item key={index} label={test} value={test} />
+                  ))}
+                </Picker>
+              </View>
+            </View>
+
+            <FlatList
+              data={filteredTests}
+              keyExtractor={(item, index) => `${item.testName}-${index}`}
+              renderItem={({ item }) => {
+                const classification = classifyResult(
+                  item.testName,
+                  item.value,
+                  userBirthDate
+                );
+
+                const ageAtTest = calculateAge(userBirthDate, item.date);
+                const classificationColor =
+                  classification === "Düşük"
+                    ? "red"
+                    : classification === "Yüksek"
+                    ? "orange"
+                    : "green";
+
+                return (
+                  <View style={styles.testContainer}>
+                    <Text style={styles.testName}>{item.testName}</Text>
+                    <Text style={styles.testValue}>
+                      Değer: {item.value} -{" "}
+                      <Text style={{ color: classificationColor }}>
+                        {classification}
+                      </Text>
+                    </Text>
+                    <Text style={styles.testDate}>
+                      Tarih: {item.date} ({ageAtTest} yaş)
+                    </Text>
+                  </View>
+                );
+              }}
+            />
+          </View>
+        )}
+
+        {!loading && !error && filteredTests.length === 0 && showFilters && (
+          <Text style={styles.noDataText}>Tahlil sonucu bulunamadı.</Text>
+        )}
+      </View>
+    </ImageBackground>
+  );
+};
+
+const styles = StyleSheet.create({
+  background: {
+    flex: 1,
+    resizeMode: "cover",
+  },
+  container: {
+    flex: 1,
+    padding: 16,
+  },
+  backButton: {
+    padding: 10,
+    backgroundColor: "#004080",
+    borderRadius: 10,
+    alignSelf: "flex-start",
+    marginBottom: 10,
+  },
+  header: {
+    fontSize: 38,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginVertical: 20,
+    marginTop: 75,
+    color: "#000080",
+  },
+  header2: {
+    fontSize: 18,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginVertical: 20,
+    marginTop: 55,
+    color: "#000080",
+  },
+  buttonContainer: {
+    alignItems: "center",
+    marginTop: 20,
+  },
+  stylishButton: {
+    backgroundColor: "#004080",
+    paddingVertical: 20,
+    paddingHorizontal: 40,
+    borderRadius: 15,
+    alignItems: "center",
+  },
+  buttonText: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#fff",
+  },
+  filterContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  filterItem: {
+    flex: 1,
+    marginHorizontal: 5,
+  },
+  picker: {
+    height: 50,
+    marginTop: 5,
+    backgroundColor: "#f9f9f9",
+    borderRadius: 5,
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: "bold",
+    marginVertical: 5,
+  },
+  testContainer: {
+    padding: 10,
+    marginVertical: 5,
+    backgroundColor: "#f9f9f9",
+    borderRadius: 5,
+  },
+  testName: {
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  testValue: {
+    fontSize: 14,
+    marginTop: 5,
+  },
+  testDate: {
+    fontSize: 14,
+    marginTop: 5,
+    color: "grey",
+  },
+  noDataText: {
+    fontSize: 16,
+    textAlign: "center",
+    marginTop: 20,
+    color: "grey",
+  },
+  errorText: {
+    fontSize: 16,
+    textAlign: "center",
+    marginTop: 20,
+    color: "red",
+  },
+});
+
+export default UserScreen;
