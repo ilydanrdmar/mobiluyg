@@ -1,0 +1,26 @@
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { initializeAuth, getReactNativePersistence } from "firebase/auth";
+import { getFirestore } from "firebase/firestore"; // Firestore için gerekli import
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyCkkffJTHk09OOHFR1laoUIVqiOYsANJD4",
+  authDomain: "reactnative-e74e4.firebaseapp.com",
+  projectId: "reactnative-e74e4",
+  storageBucket: "reactnative-e74e4.firebasestorage.app",
+  messagingSenderId: "812791916101",
+  appId: "1:812791916101:web:7c24c918cd2a3c3dd5252c",
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+
+// Initialize Firebase Auth with AsyncStorage persistence
+export const auth = initializeAuth(app, {
+  persistence: getReactNativePersistence(AsyncStorage),
+});
+
+// Initialize Firestore
+export const db = getFirestore(app); // Firestore başlatma
